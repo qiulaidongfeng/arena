@@ -1,5 +1,7 @@
 # arena
 
+[English](./README_en.md)
+
 #### 介绍
 go1.20引入了arena.Arena，但不能同时被多个goroutine使用,且go1.n(n<20)不能使用，本包提供解除这些限制的Arena
 
