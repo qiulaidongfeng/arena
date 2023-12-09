@@ -26,17 +26,19 @@ type bufsi struct {
 }
 
 // NewArena 创建一组代表一起分配和释放的Go值的集合，内存大小为n*dataSize（n=bufsize/dataSize）
-//   - dataSize 是单个Go值大小，决定 [Arena.Alloc] 返回的指针指向的内存的长度，单位是字节
-//   - bufsize 是可选的，决定 [Arena.Alloc] 每次自动扩容分配多大内存，默认为8Mb,必须大于dataSize
-func NewArena(dataSize uintptr, bufsize ...int64) *Arena {
+//
+//	dataSize 是单个Go值大小，决定 [Arena.Alloc] 返回的指针指向的内存的长度，单位是字节
+//
+//	- bufsize 是可选的，决定 [Arena.Alloc] 每次自动扩容分配多大内存，默认为8Mb,必须大于dataSize
+func NewArena(bufsize ...int64) *Arena {
 	ret := &Arena{}
 	var nbuf *buf
 	if len(bufsize) == 0 {
 		ret.bufsize = defaultmem
-		nbuf = newbuf(int64(dataSize), defaultmem)
+		nbuf = newbuf(defaultmem)
 	} else {
 		ret.bufsize = bufsize[0]
-		nbuf = newbuf(int64(dataSize), bufsize[0])
+		nbuf = newbuf(bufsize[0])
 	}
 	bufs := make([]*buf, 1)
 	bufs[0] = nbuf
@@ -50,18 +52,19 @@ func (a *Arena) reAlloc() {
 	a.lock.Lock()
 	bufs := a.bufas.Load().(*bufsi)
 	if bufs.bufs[bufs.i].empty() {
-		bufsn := append(bufs.bufs, newbuf(bufs.bufs[0].dataSize, a.bufsize))
+		bufsn := append(bufs.bufs, newbuf(a.bufsize))
 		a.bufas.Store(&bufsi{bufs: bufsn, i: bufs.i + 1})
 	}
 	a.lock.Unlock()
 }
 
-// Alloc分配一个固定大小的Go值，并返回指针，[NewArena] 的dataSize是这个固定大小
+// Alloc分配一个Go值，并返回指针
+// dataSize是这个Go值大小
 //
 // 返回的指针如果访问超过固定大小的内存，行为是未定义且不安全的
-func (a *Arena) Alloc() unsafe.Pointer {
+func (a *Arena) Alloc(dataSize uintptr) unsafe.Pointer {
 	bufs := a.bufas.Load().(*bufsi)
-	return bufs.bufs[bufs.i].move(a)
+	return bufs.bufs[bufs.i].move(a, dataSize)
 }
 
 // Free 释放所有Go值

@@ -18,7 +18,7 @@ type user struct {
 
 func TestAlloc(t *testing.T) {
 	var value, check []*user = make([]*user, n), make([]*user, n)
-	a := NewArena(unsafe.Sizeof(user{}))
+	a := NewArena()
 	var wg *sync.WaitGroup = new(sync.WaitGroup)
 	var sema = make(chan struct{}, 8100)
 	for i := 0; i < 8100; i++ {
@@ -29,7 +29,7 @@ func TestAlloc(t *testing.T) {
 		<-sema
 		go func(gi int) {
 			defer wg.Done()
-			u := (*user)(a.Alloc())
+			u := (*user)(a.Alloc(unsafe.Sizeof(user{})))
 			u.a = 1
 			u.b = 2
 			u.c = 3
@@ -49,23 +49,23 @@ func TestAlloc(t *testing.T) {
 }
 
 func BenchmarkAlloc_3int_P1(b *testing.B) {
-	a := NewArena(unsafe.Sizeof(user{}))
+	a := NewArena()
 	b.SetBytes(9)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		a.Alloc()
+		a.Alloc(unsafe.Sizeof(user{}))
 	}
 	a.Free()
 	runtime.GC()
 }
 
 func BenchmarkAlloc_3int(b *testing.B) {
-	a := NewArena(unsafe.Sizeof(user{}))
+	a := NewArena()
 	b.SetBytes(9)
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			a.Alloc()
+			a.Alloc(unsafe.Sizeof(user{}))
 		}
 	})
 	a.Free()
