@@ -1,16 +1,12 @@
 package arena
 
-import (
-	"unsafe"
-)
-
 func ExampleArena() {
 	type user struct {
 		a, b, c int
 	}
-	a := NewArena()
+	a := New()
 	//分配并使用
-	b := (*user)(a.Alloc(unsafe.Sizeof(user{})))
+	b := Alloc[user](a)
 	b.a = 1
 	b.c = 2
 	//使用完毕

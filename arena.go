@@ -2,77 +2,78 @@ package arena
 
 import (
 	"sync"
-	"sync/atomic"
 	"unsafe"
 )
 
-const defaultmem = 1024 * 1024 * 8 //8mb
+const defaultmem = 8 * 1024 * 1024 //8mb
 
-// Arena是go1.20引入的arena.Arena的升级替代，创建后不得复制
+// Arena是go1.20引入的arena.Arena的升级替代
+//
+// 它通过为每个类型准备内存池实现
 //
 // 与go1.20引入的arena.Arena相比，有下列不同
 //   - 可以同时在多个goroutine使用
-//   - 不使用泛型，可以在版本低于go1.20使用
-//   - 只能分配固定大小的Go值
+//   - 可以在版本低于go1.20使用
+//   - 不会发生释放后使用
+//
+// 创建后不得复制
 type Arena struct {
-	lock    sync.Mutex
-	bufas   atomic.Value //type=*bufsi
-	bufsize int64
+	typs map[uintptr]interface{} //value=*memPool
+	lock sync.RWMutex
 }
 
-type bufsi struct {
-	bufs []*buf
-	i    int64
+// New创建一个 [*Arena]
+func New() *Arena {
+	return &Arena{
+		typs: make(map[uintptr]interface{}),
+	}
 }
 
-// NewArena 创建一组代表一起分配和释放的Go值的集合，内存大小为n*dataSize（n=bufsize/dataSize）
-//
-//	dataSize 是单个Go值大小，决定 [Arena.Alloc] 返回的指针指向的内存的长度，单位是字节
-//
-//	- bufsize 是可选的，决定 [Arena.Alloc] 每次自动扩容分配多大内存，默认为8Mb,必须大于dataSize
-func NewArena(bufsize ...int64) *Arena {
-	ret := &Arena{}
-	var nbuf *buf
-	if len(bufsize) == 0 {
-		ret.bufsize = defaultmem
-		nbuf = newbuf(defaultmem)
+// getMemPool 获取 [*Arena] 中某个类型的 [*memPool]
+func getMemPool[T any](a *Arena, bufsize ...int64) *MemPool[T] {
+	var zero T
+	rtype := rtypeOf(zero)
+	a.lock.RLock()
+	// 小心这里的想法未来成为现实
+	// https://github.com/golang/go/issues/62483#issuecomment-1800913220
+	// Can we put all the runtime._types in one of these weak maps?
+	// So when no more pointers to that runtime._type exist, the entry itself can be garbage collected.
+	// 导致同一类型的*rtype不同
+	mempool := a.typs[rtype]
+	if mempool == nil {
+		a.lock.RUnlock()
+		a.lock.Lock()
+		mempool = NewMemPool[T](unsafe.Sizeof(zero), rtype, bufsize...)
+		a.typs[rtype] = mempool
+		a.lock.Unlock()
 	} else {
-		ret.bufsize = bufsize[0]
-		nbuf = newbuf(bufsize[0])
+		a.lock.RUnlock()
 	}
-	bufs := make([]*buf, 1)
-	bufs[0] = nbuf
-	bufas_value := &bufsi{bufs: bufs, i: 0}
-	ret.bufas.Store(bufas_value)
-	return ret
+	return mempool.(*MemPool[T])
 }
 
-// reAlloc 执行扩容
-func (a *Arena) reAlloc() {
-	a.lock.Lock()
-	bufs := a.bufas.Load().(*bufsi)
-	if bufs.bufs[bufs.i].empty() {
-		bufsn := append(bufs.bufs, newbuf(a.bufsize))
-		a.bufas.Store(&bufsi{bufs: bufsn, i: bufs.i + 1})
-	}
-	a.lock.Unlock()
-}
-
-// Alloc分配一个Go值，并返回指针
-// dataSize是这个Go值大小
+// Alloc 从 [*Arena] 中创建一个 T , 并返回指针
 //
-// 返回的指针如果访问超过固定大小的内存，行为是未定义且不安全的
-func (a *Arena) Alloc(dataSize uintptr) unsafe.Pointer {
-	bufs := a.bufas.Load().(*bufsi)
-	return bufs.bufs[bufs.i].move(a, dataSize)
+//   - bufsize 是可选的，决定 [MemPool.Alloc] 每次自动扩容分配多大内存，默认为8Mb,必须大于unsafe.Sizeof(*new(T))
+func Alloc[T any](a *Arena, bufsize ...int64) *T {
+	mempool := getMemPool[T](a, bufsize...)
+	return mempool.Alloc()
 }
 
-// Free 释放所有Go值
+// Alloc 从 [*Arena] 中创建一些连续的 T , 并返回切片
 //
-// 从调用的一刻开始，通过 [Arena.Alloc] 获取的指针，读写内存，行为是未定义且不安全的
+//   - bufsize 是可选的，决定 [MemPool.AllocSlice] 每次自动扩容分配多大内存，默认为8Mb,必须大于unsafe.Sizeof(*new(T))*uintptr(cap)
+func AllocSlice[T any](a *Arena, len, cap int, bufsize ...int64) []T {
+	mempool := getMemPool[T](a, bufsize...)
+	return mempool.AllocSlice(len, cap)
+}
+
+// Free 释放所有内存，只能调用一次，否则行为未定义
 func (a *Arena) Free() {
-	bufs := a.bufas.Load().(*bufsi)
-	for i := 0; i < len(bufs.bufs); i++ {
-		bufs.bufs[bufs.i].Free()
+	// Free 假设Arena用完后，只会调用1次Free,所以不加锁
+	for _, v := range a.typs {
+		v.(interface {
+			Free()
+		}).Free()
 	}
 }

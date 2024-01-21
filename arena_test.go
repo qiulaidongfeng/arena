@@ -1,11 +1,12 @@
 package arena
 
 import (
+	"math"
 	"reflect"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"testing"
-	"unsafe"
 )
 
 const n = 100000
@@ -16,9 +17,15 @@ type user struct {
 	c int
 }
 
+type userptr struct {
+	a *int
+	b *int
+	c *int
+}
+
 func TestAlloc(t *testing.T) {
 	var value, check []*user = make([]*user, n), make([]*user, n)
-	a := NewArena()
+	a := New()
 	var wg *sync.WaitGroup = new(sync.WaitGroup)
 	var sema = make(chan struct{}, 8100)
 	for i := 0; i < 8100; i++ {
@@ -29,7 +36,7 @@ func TestAlloc(t *testing.T) {
 		<-sema
 		go func(gi int) {
 			defer wg.Done()
-			u := (*user)(a.Alloc(unsafe.Sizeof(user{})))
+			u := Alloc[user](a)
 			u.a = 1
 			u.b = 2
 			u.c = 3
@@ -48,26 +55,93 @@ func TestAlloc(t *testing.T) {
 	a.Free()
 }
 
-func BenchmarkAlloc_3int_P1(b *testing.B) {
-	a := NewArena()
+func BenchmarkAlloc_int_P1(b *testing.B) {
+	a := New()
 	b.SetBytes(9)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		a.Alloc(unsafe.Sizeof(user{}))
+		Alloc[int](a)
 	}
 	a.Free()
 	runtime.GC()
+	debug.FreeOSMemory()
 }
 
-func BenchmarkAlloc_3int(b *testing.B) {
-	a := NewArena()
+func BenchmarkAlloc_int(b *testing.B) {
+	a := New()
 	b.SetBytes(9)
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			a.Alloc(unsafe.Sizeof(user{}))
+			Alloc[int](a)
 		}
 	})
 	a.Free()
 	runtime.GC()
+	debug.FreeOSMemory()
+}
+
+func TestAllocPtr(t *testing.T) {
+	var value, check []*userptr = make([]*userptr, n), make([]*userptr, n)
+	a := New()
+	var wg *sync.WaitGroup = new(sync.WaitGroup)
+	var sema = make(chan struct{}, 8100)
+	for i := 0; i < 8100; i++ {
+		sema <- struct{}{}
+	}
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		<-sema
+		go func(gi int) {
+			defer wg.Done()
+			u := Alloc[userptr](a)
+			u.a = new(int)
+			u.b = new(int)
+			u.c = new(int)
+			value[gi] = u
+			cu := *u
+			check[gi] = &cu
+			sema <- struct{}{}
+		}(i)
+	}
+	wg.Wait()
+	for i := 0; i < n; i++ {
+		if !reflect.DeepEqual(value[i], check[i]) {
+			t.Fatalf("%d value=%+v , check =%+v", i, value[i], check[i])
+		}
+	}
+	a.Free()
+}
+
+func TestAllocSliceint_Len2(t *testing.T) {
+	var value, check [][]int = make([][]int, n), make([][]int, n)
+	a := New()
+	var wg *sync.WaitGroup = new(sync.WaitGroup)
+	var sema = make(chan struct{}, 8100)
+	for i := 0; i < 8100; i++ {
+		sema <- struct{}{}
+	}
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		<-sema
+		go func(gi int) {
+			defer wg.Done()
+			u := AllocSlice[int](a, 2, 2)
+			u[0] = math.MaxInt64
+			u[1] = math.MaxInt64
+			value[gi] = u
+			cu := make([]int, 2)
+			cu[0] = math.MaxInt64
+			cu[1] = math.MaxInt64
+			check[gi] = cu
+			sema <- struct{}{}
+		}(i)
+	}
+	wg.Wait()
+	for i := 0; i < n; i++ {
+		if !reflect.DeepEqual(value[i], check[i]) {
+			t.Fatalf("%d value=%+v , check =%+v", i, value[i], check[i])
+		}
+	}
+	a.Free()
 }

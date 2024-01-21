@@ -10,4 +10,6 @@ Go1.20 introduces arena. Arena, but it cannot be used by multiple goroutines at 
 
 - It can be used in multiple goroutines at the same time
 
-- Do not use generics. You can use generics in versions earlier than go1.20
+- It can be used in versions younger than go1.20 (>=go1.18)
+
+- not happen use-after-free
