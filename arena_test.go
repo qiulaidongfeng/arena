@@ -2,6 +2,7 @@ package arena
 
 import (
 	"math"
+	"os"
 	"reflect"
 	"runtime"
 	"runtime/debug"
@@ -144,4 +145,39 @@ func TestAllocSliceint_Len2(t *testing.T) {
 		}
 	}
 	a.Free()
+}
+
+func BenchmarkAlloc_int_new(b *testing.B) {
+	f := new(int)
+	b.SetBytes(9)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		f = new(int)
+	}
+	*f = 1
+	runtime.GC()
+	debug.FreeOSMemory()
+}
+
+func BenchmarkAlloc_intAndFree(b *testing.B) {
+	b.SetBytes(9)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		a := New()
+		for i := 0; i < 100; i++ {
+			Alloc[int](a)
+		}
+		a.Free()
+	}
+}
+
+func TestMain(m *testing.M) {
+	println("UseAfterFree(false)")
+	exit := m.Run()
+	if exit != 0 {
+		os.Exit(exit)
+	}
+	UseAfterFree(true)
+	println("UseAfterFree(true)")
+	os.Exit(m.Run())
 }

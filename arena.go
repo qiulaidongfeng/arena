@@ -2,6 +2,7 @@ package arena
 
 import (
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -76,4 +77,21 @@ func (a *Arena) Free() {
 			Free()
 		}).Free()
 	}
+}
+
+var enableUseAfterFree int64
+
+// EnableUseAfterFree 使得 [*Arena] 和 [*MemPool] 可以发生
+// use-after-free (释放后使用) 来优化性能
+//
+// 因为只要有一个 [*Arena] 或 [*MemPool] 可以发生
+// use-after-free (释放后使用) 就不能保证不发生数据竞争等问题
+// 所以设计成 use-after-free (释放后使用)
+// 不是不会发生就是都有可能发生
+func UseAfterFree(enable bool) {
+	if enable {
+		atomic.StoreInt64(&enableUseAfterFree, 1)
+		return
+	}
+	atomic.StoreInt64(&enableUseAfterFree, 0)
 }

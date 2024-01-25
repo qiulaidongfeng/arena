@@ -1,6 +1,7 @@
 package arena
 
 import (
+	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -10,16 +11,36 @@ type buf[T any] struct {
 	buf      []T
 	index    int64
 	dataSize int64
+	rtype    uintptr
+	bufSize  int64
 }
 
 func newbuf[T any](bufsize int64, rtype uintptr, dataSize int64) *buf[T] {
-	return &buf[T]{
-		buf: newSlice[T](
+	useAfterFree := atomic.LoadInt64(&enableUseAfterFree)
+	var Buf []T
+	if useAfterFree == 0 {
+		Buf = newSlice[T](
 			runtime_mallocgc(uintptr(bufsize), rtype, true),
 			bufsize,
-			dataSize),
+			dataSize)
+	} else {
+		pool := getMemBlockPool(rtype, bufsize)
+		mem := pool.Get()
+		if mem == nil {
+			Buf = newSlice[T](
+				runtime_mallocgc(uintptr(bufsize), rtype, true),
+				bufsize,
+				dataSize)
+		} else {
+			Buf = *(mem.(*[]T))
+		}
+	}
+	return &buf[T]{
+		buf:      Buf,
 		index:    0,
 		dataSize: dataSize,
+		rtype:    rtype,
+		bufSize:  bufsize,
 	}
 }
 
@@ -77,8 +98,44 @@ func ptrToSlice[T any](ptr unsafe.Pointer, len, cap int) (ret []T) {
 
 // Free 释放内存池的内存
 func (b *buf[T]) Free() {
-	b.buf = nil
+	useAfterFree := atomic.LoadInt64(&enableUseAfterFree)
+	if useAfterFree == 0 {
+		b.buf = nil
+		return
+	}
+	pool := getMemBlockPool(b.rtype, b.bufSize)
+	pool.Put(&b.buf)
 }
+
+func getMemBlockPool(rtype uintptr, bufSize int64) *sync.Pool {
+	m, have := globarPool.Load(rtype)
+	if !have {
+		m = new(sync.Map)
+		//无论是否成功，都说明同样类型的内存块的sync.Pool有了
+		m, _ = globarPool.LoadOrStore(rtype, m)
+	}
+	typmap := m.(*sync.Map)
+	// 上面拿到了 每个类型不同的 sync.map
+	blockm, have := typmap.Load(bufSize)
+	if !have {
+		blockm = new(sync.Map)
+		blockm, _ = typmap.LoadOrStore(bufSize, blockm)
+	}
+	blockmap := blockm.(*sync.Map)
+	// 上面拿到放在同样类型不同大小内存块的 sync.Map
+	blockp, have := blockmap.Load(bufSize)
+	if !have {
+		blockp = new(sync.Pool)
+		blockp, _ = blockmap.LoadOrStore(bufSize, blockp)
+	}
+	blockPool := blockp.(*sync.Pool)
+	// 上面拿到放在同样类型相同大小内存块的 sync.Pool
+	return blockPool
+}
+
+// globarPool key is uintptr(*runtime._type)  value is sync.Map(typmap)
+// value is key is int value is sync.Map(blockmap)(key is int value is sync.Pool)
+var globarPool sync.Map
 
 //go:linkname runtime_mallocgc runtime.mallocgc
 func runtime_mallocgc(size uintptr, typ uintptr, needzero bool) unsafe.Pointer
