@@ -1,3 +1,3 @@
-module gitee.com/qiulaidongfeng/arena
+module arenas
 
 go 1.18
