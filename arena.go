@@ -69,6 +69,20 @@ func AllocSlice[T any](a *Arena, len, cap int, bufsize ...int64) []T {
 	return mempool.AllocSlice(len, cap)
 }
 
+// AllocSoonUse 从 [*Arena] 中创建一个 T , 并返回指针
+//
+//   - bufsize 是可选的，决定 [MemPool.Alloc] 每次自动扩容分配多大内存，默认为8Mb,必须大于unsafe.Sizeof(*new(T))
+//
+// 对这个函数的多次调用将尽可能把返回的指针指向接近的内存地址，以提高很快就要使用的一批不同类型数据的缓存命中率
+//
+// 请勿从此函数分配含有指针的类型，否则分配出的内存将对GC隐藏这个类型的对象中的指针，这可能导致一些还在使用的内存被GC回收
+func AllocSoonUse[T any](a *Arena, bufsize ...int64) *T {
+	mempool := getMemPool[byte](a, bufsize...)
+	size := int(unsafe.Sizeof(*new(T)))
+	buf := mempool.AllocSlice(size, size)
+	return (*T)(unsafe.Pointer(&buf[0]))
+}
+
 // Free 释放所有内存，只能调用一次，否则行为未定义
 func (a *Arena) Free() {
 	// Free 假设Arena用完后，只会调用1次Free,所以不加锁
