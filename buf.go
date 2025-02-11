@@ -37,7 +37,7 @@ func newbuf[T any](bufsize int64, rtype uintptr, dataSize int64) *buf[T] {
 	}
 	return &buf[T]{
 		buf:      Buf,
-		index:    0,
+		index:    -1,
 		dataSize: dataSize,
 		rtype:    rtype,
 		bufSize:  bufsize,
@@ -63,11 +63,6 @@ func newSlice[T any](ptr unsafe.Pointer, cap int64, dataSize int64) (ret []T) {
 // move 从切片中分配固定大小的Go值，切片容量不足时会自动扩容
 func (b *buf[T]) move(a *MemPool[T]) *T {
 	n_index := atomic.AddInt64(&b.index, 1)
-	// 这是为了支持moveSlice
-	// 还避免浪费切片开头的1个Go值
-	// 从基准测试看，只让单线程性能变慢了<1ns
-	// 作者认为值得
-	n_index -= 1
 	if n_index >= int64(len(b.buf)) { //切片容量不足
 		a.reAlloc()      //扩容
 		return a.Alloc() //重新分配
@@ -80,6 +75,7 @@ func (b *buf[T]) moveSlice(a *MemPool[T], Len int, cap int) []T {
 	// add_index 是需要分配的Go值数量
 	add_index := int64(cap)
 	n_index := atomic.AddInt64(&b.index, add_index)
+	n_index += 1
 	if n_index > int64(len(b.buf)) { //切片容量不足
 		a.reAlloc()                   //扩容
 		return a.AllocSlice(Len, cap) //重新分配
@@ -116,7 +112,7 @@ func getMemBlockPool(rtype uintptr, bufSize int64) *sync.Pool {
 	}
 	typmap := m.(*sync.Map)
 	// 上面拿到了 每个类型不同的 sync.map
-	p, have := typmap.Load(bufSize)
+	p, _ := typmap.Load(bufSize)
 	// 上面拿到放在同样类型不同大小内存块的 sync.Map
 	blockp, have := p.(*sync.Pool)
 	if !have {
@@ -140,10 +136,10 @@ func runtime_mallocgc(size uintptr, typ uintptr, needzero bool) unsafe.Pointer
 // rtypeOf directly extracts the *rtype of the provided value.
 func rtypeOf(i any) uintptr {
 	// 这里依赖go的接口相当于
-	// type eface struct {
-	// typ *runtime._type
-	// data unsafe.Pointer
-	//	}
-	eface := (*[2]uintptr)(unsafe.Pointer(&i))
-	return eface[0]
+	type eface struct {
+		typ  uintptr
+		data unsafe.Pointer
+	}
+	e := (*eface)(unsafe.Pointer(&i))
+	return e.typ
 }

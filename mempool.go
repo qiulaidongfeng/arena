@@ -25,8 +25,8 @@ type MemPool[T any] struct {
 	// 每个go类型T的 *runtime._type
 	rtype uintptr
 	//bufas 是内存池当前正在使用的一段连续内存
-	bufas atomic.Value //type=*buf
-	// bufsize 是自动扩容分配的内存，默认为8Mb
+	bufas atomic.Pointer[buf[T]]
+	// bufsize 是自动扩容分配的内存，默认为64Mb
 	bufsize int64
 }
 
@@ -34,7 +34,7 @@ type MemPool[T any] struct {
 //
 //   - dataSize 是单个Go值大小，单位是字节
 //   - rtype 是go类型T的 *runtime._type
-//   - bufsize 是可选的，决定 [MemPool] 每次自动扩容分配多大内存，默认为8Mb，必须大于dataSize
+//   - bufsize 是可选的，决定 [MemPool] 每次自动扩容分配多大内存，默认为64Mb，必须大于dataSize
 func NewMemPool[T any](dataSize uintptr, rtype uintptr, bufsize ...int64) *MemPool[T] {
 	ret := &MemPool[T]{rtype: rtype}
 	var nbuf *buf[T]
@@ -63,13 +63,13 @@ func (a *MemPool[T]) reAlloc() {
 
 // Alloc 分配一个Go值，并返回指针
 func (a *MemPool[T]) Alloc() *T {
-	buf := a.bufas.Load().(*buf[T])
+	buf := a.bufas.Load()
 	return buf.move(a)
 }
 
 // AllocSlice 分配连续的go值，并返回切片
 func (a *MemPool[T]) AllocSlice(len, cap int) []T {
-	buf := a.bufas.Load().(*buf[T])
+	buf := a.bufas.Load()
 	return buf.moveSlice(a, len, cap)
 }
 

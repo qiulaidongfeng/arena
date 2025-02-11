@@ -6,7 +6,7 @@ import (
 	"unsafe"
 )
 
-const defaultmem = 8 * 1024 * 1024 //8mb
+const defaultmem = 64 * 1024 * 1024 //64mb
 
 // Arena是go1.20引入的arena.Arena的升级替代
 //
@@ -19,38 +19,61 @@ const defaultmem = 8 * 1024 * 1024 //8mb
 //
 // 创建后不得复制
 type Arena struct {
-	typs map[uintptr]interface{} //value=*memPool
-	lock sync.RWMutex
+	typs atomic.Pointer[map[uintptr]any] //value=*memPool
+	lock sync.Mutex
 }
 
 // New创建一个 [*Arena]
 func New() *Arena {
-	return &Arena{
-		typs: make(map[uintptr]interface{}),
-	}
+	return &Arena{}
 }
 
 // getMemPool 获取 [*Arena] 中某个类型的 [*memPool]
 func getMemPool[T any](a *Arena, bufsize ...int64) *MemPool[T] {
 	var zero T
+	var mempool *MemPool[T]
 	rtype := rtypeOf(zero)
-	a.lock.RLock()
-	// 小心这里的想法未来成为现实
-	// https://github.com/golang/go/issues/62483#issuecomment-1800913220
-	// Can we put all the runtime._types in one of these weak maps?
-	// So when no more pointers to that runtime._type exist, the entry itself can be garbage collected.
-	// 导致同一类型的*rtype不同
-	mempool := a.typs[rtype]
-	if mempool == nil {
-		a.lock.RUnlock()
-		a.lock.Lock()
-		mempool = NewMemPool[T](unsafe.Sizeof(zero), rtype, bufsize...)
-		a.typs[rtype] = mempool
-		a.lock.Unlock()
+	m := a.typs.Load()
+	if m == nil {
+		mempool = addT[T](a, rtype, unsafe.Sizeof(zero), bufsize...)
 	} else {
-		a.lock.RUnlock()
+		// 小心这里的想法未来成为现实
+		// https://github.com/golang/go/issues/62483#issuecomment-1800913220
+		// Can we put all the runtime._types in one of these weak maps?
+		// So when no more pointers to that runtime._type exist, the entry itself can be garbage collected.
+		// // 导致同一类型的*rtype不同
+		if m, ok := (*m)[rtype]; ok {
+			mempool = m.(*MemPool[T])
+		} else {
+			mempool = addT[T](a, rtype, unsafe.Sizeof(zero), bufsize...)
+		}
 	}
-	return mempool.(*MemPool[T])
+	return mempool
+}
+
+func addT[T any](a *Arena, rtype uintptr, size uintptr, bufsize ...int64) (ret *MemPool[T]) {
+	a.lock.Lock()
+	m := a.typs.Load()
+	if m == nil {
+		n := make(map[uintptr]any)
+		ret = NewMemPool[T](size, rtype, bufsize...)
+		n[rtype] = ret
+		a.typs.Store(&n)
+	} else {
+		if m, ok := (*m)[rtype]; ok {
+			a.lock.Unlock()
+			return m.(*MemPool[T])
+		}
+		n := make(map[uintptr]any)
+		for k, v := range *m {
+			n[k] = v
+		}
+		ret = NewMemPool[T](size, rtype, bufsize...)
+		n[rtype] = ret
+		a.typs.Store(&n)
+	}
+	a.lock.Unlock()
+	return
 }
 
 // Alloc 从 [*Arena] 中创建一个 T , 并返回指针
@@ -85,8 +108,12 @@ func AllocSoonUse[T any](a *Arena, bufsize ...int64) *T {
 
 // Free 释放所有内存，只能调用一次，否则行为未定义
 func (a *Arena) Free() {
+	m := a.typs.Load()
+	if m == nil {
+		return
+	}
 	// Free 假设Arena用完后，只会调用1次Free,所以不加锁
-	for _, v := range a.typs {
+	for _, v := range *m {
 		v.(interface {
 			Free()
 		}).Free()
