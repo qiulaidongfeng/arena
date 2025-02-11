@@ -15,7 +15,8 @@ const defaultmem = 64 * 1024 * 1024 //64mb
 // 与go1.20引入的arena.Arena相比，有下列不同
 //   - 可以同时在多个goroutine使用
 //   - 可以在版本低于go1.20使用
-//   - 不会发生释放后使用
+//   - 不会发生释放后使用 （可以关闭）
+//   - 性能更好
 //
 // 创建后不得复制
 type Arena struct {
@@ -28,7 +29,7 @@ func New() *Arena {
 	return &Arena{}
 }
 
-// getMemPool 获取 [*Arena] 中某个类型的 [*memPool]
+// getMemPool 获取 [*Arena] 中某个类型的 [*MemPool]
 func getMemPool[T any](a *Arena, bufsize ...int64) *MemPool[T] {
 	var zero T
 	var mempool *MemPool[T]
@@ -78,7 +79,7 @@ func addT[T any](a *Arena, rtype uintptr, size uintptr, bufsize ...int64) (ret *
 
 // Alloc 从 [*Arena] 中创建一个 T , 并返回指针
 //
-//   - bufsize 是可选的，决定 [MemPool.Alloc] 每次自动扩容分配多大内存，默认为8Mb,必须大于unsafe.Sizeof(*new(T))
+//   - bufsize 是可选的，决定 [MemPool.Alloc] 每次自动扩容分配多大内存，默认为64Mb,必须大于unsafe.Sizeof(*new(T))
 func Alloc[T any](a *Arena, bufsize ...int64) *T {
 	mempool := getMemPool[T](a, bufsize...)
 	return mempool.Alloc()
@@ -86,7 +87,7 @@ func Alloc[T any](a *Arena, bufsize ...int64) *T {
 
 // Alloc 从 [*Arena] 中创建一些连续的 T , 并返回切片
 //
-//   - bufsize 是可选的，决定 [MemPool.AllocSlice] 每次自动扩容分配多大内存，默认为8Mb,必须大于unsafe.Sizeof(*new(T))*uintptr(cap)
+//   - bufsize 是可选的，决定 [MemPool.AllocSlice] 每次自动扩容分配多大内存，默认为64Mb,必须大于unsafe.Sizeof(*new(T))*uintptr(cap)
 func AllocSlice[T any](a *Arena, len, cap int, bufsize ...int64) []T {
 	mempool := getMemPool[T](a, bufsize...)
 	return mempool.AllocSlice(len, cap)
@@ -94,7 +95,7 @@ func AllocSlice[T any](a *Arena, len, cap int, bufsize ...int64) []T {
 
 // AllocSoonUse 从 [*Arena] 中创建一个 T , 并返回指针
 //
-//   - bufsize 是可选的，决定 [MemPool.Alloc] 每次自动扩容分配多大内存，默认为8Mb,必须大于unsafe.Sizeof(*new(T))
+//   - bufsize 是可选的，决定 [MemPool.Alloc] 每次自动扩容分配多大内存，默认为64Mb,必须大于unsafe.Sizeof(*new(T))
 //
 // 对这个函数的多次调用将尽可能把返回的指针指向接近的内存地址，以提高很快就要使用的一批不同类型数据的缓存命中率
 //

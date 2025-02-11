@@ -10,6 +10,8 @@ Go1.20 introduces arena. Arena, but it cannot be used by multiple goroutines at 
 
 - It can be used in multiple goroutines at the same time
 
-- It can be used in versions younger than go1.20 (>=go1.18)
+- It can be used in versions younger than go1.20 (>=go1.19)
 
-- not happen use-after-free
+- not happen use-after-free (can disable)
+
+- better performance
