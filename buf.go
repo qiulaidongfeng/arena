@@ -116,21 +116,18 @@ func getMemBlockPool(rtype uintptr, bufSize int64) *sync.Pool {
 	}
 	typmap := m.(*sync.Map)
 	// 上面拿到了 每个类型不同的 sync.map
-	blockm, have := typmap.Load(bufSize)
-	if !have {
-		blockm = new(sync.Map)
-		blockm, _ = typmap.LoadOrStore(bufSize, blockm)
-	}
-	blockmap := blockm.(*sync.Map)
+	p, have := typmap.Load(bufSize)
 	// 上面拿到放在同样类型不同大小内存块的 sync.Map
-	blockp, have := blockmap.Load(bufSize)
+	blockp, have := p.(*sync.Pool)
 	if !have {
 		blockp = new(sync.Pool)
-		blockp, _ = blockmap.LoadOrStore(bufSize, blockp)
+		p, _ = typmap.LoadOrStore(bufSize, blockp)
+		// Note 这里的类型断言肯定成功，因为如果是写操作，得到的是刚刚的new(sync.Pool)，
+		// 如果是读操作，读到的是其他goroutine写的new(sync.Pool)
+		blockp = p.(*sync.Pool)
 	}
-	blockPool := blockp.(*sync.Pool)
 	// 上面拿到放在同样类型相同大小内存块的 sync.Pool
-	return blockPool
+	return blockp
 }
 
 // globarPool key is uintptr(*runtime._type)  value is sync.Map(typmap)
