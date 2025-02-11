@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func BenchmarkAlloc_int_stdArena(b *testing.B) {
+func BenchmarkStd_Arena_Alloc_int(b *testing.B) {
 	a := sa.NewArena()
 	b.SetBytes(9)
 	b.ReportAllocs()
@@ -21,7 +21,7 @@ func BenchmarkAlloc_int_stdArena(b *testing.B) {
 	debug.FreeOSMemory()
 }
 
-func BenchmarkAlloc_intAndFree_arena(b *testing.B) {
+func BenchmarkStd_Arena_Alloc_intAndFree(b *testing.B) {
 	b.SetBytes(9)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {

@@ -147,7 +147,7 @@ func TestAllocSliceint_Len2(t *testing.T) {
 	a.Free()
 }
 
-func BenchmarkAlloc_int_new(b *testing.B) {
+func BenchmarkStdNew(b *testing.B) {
 	f := new(int)
 	b.SetBytes(9)
 	b.ReportAllocs()
